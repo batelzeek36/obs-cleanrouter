@@ -2,19 +2,16 @@
 <html>
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>CleanRouter Overlay (debug)</title>
+<title>CleanRouter Overlay</title>
 <style>
   :root{ --pad:10px; --radius:12px; --margin:24px; --scale:1.25; --bg:rgba(0,0,0,.7); --fg:#fff; }
   html,body{margin:0;height:100%;background:#000;overflow:hidden;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif}
   #stage{position:fixed;inset:0}
-  #ytplayer{width:100%!important;height:100%!important}
   .credit{position:absolute;bottom:var(--margin);left:var(--margin);z-index:10;pointer-events:none;transform-origin:left bottom;transform:scale(var(--scale))}
   .badge{background:var(--bg);color:var(--fg);padding:var(--pad) calc(var(--pad)+6px);border-radius:var(--radius);max-width:min(45vw,820px);text-align:left;line-height:1.25}
   .title{font-weight:800;font-size:clamp(16px,2vw,26px);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .channel{margin-top:4px;font-weight:600;opacity:.95;font-size:clamp(13px,1.5vw,18px);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .channel a{color:inherit;text-decoration:none}
-  .hud{position:absolute;right:12px;top:12px;z-index:20;background:rgba(0,0,0,.9);color:#0f0;border-radius:8px;padding:8px 12px;font:16px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;white-space:pre;max-width:400px}
-  .hud .err{color:#f55}
 </style>
 </head>
 <body>
@@ -27,42 +24,28 @@
   </div>
 </div>
 
-<div class="hud" id="hud">boot…</div>
-
 <script>
   const stage = document.getElementById('stage');
   const titleEl = document.getElementById('title');
   const channelEl = document.getElementById('channel');
   const credit = document.getElementById('credit');
-  const hud = document.getElementById('hud');
 
   let player = null, lastVideoId = null, lastState = null;
-  const log = (m, isErr=false)=>{ hud.innerHTML += (hud.textContent ? "\n" : "") + (isErr? "✖ " : "✔ ") + m; if(isErr) hud.classList.add('err'); };
-  hud.textContent = "starting…";
 
   // Load YT IFrame API
-  (function(){
-    const tag = document.createElement('script');
-    tag.src = "https://www.youtube.com/iframe_api";
-    tag.onload = ()=>log("YT API loaded");
-    tag.onerror = ()=>log("YT API failed to load", true);
-    document.head.appendChild(tag);
-  })();
+  const tag = document.createElement('script');
+  tag.src = "https://www.youtube.com/iframe_api";
+  document.head.appendChild(tag);
 
   function loadVideo(videoId){
     if(!videoId) return;
     lastVideoId = videoId;
     stage.innerHTML = '<div id="ytplayer"></div>';
-    const tryHosts = ['https://www.youtube.com', 'https://www.youtube-nocookie.com']; // try normal, then nocookie
-    let tried = 0;
 
-    function makePlayer(host){
-      log(`create player @ ${host.replace('https://','')}`);
+    function makePlayer(){
       player = new YT.Player('ytplayer', {
-        host,
+        host: 'https://www.youtube.com',
         videoId,
-        width: '100%',
-        height: '100%',
         playerVars: {
           autoplay: 1, controls: 1, rel: 0, modestbranding: 1,
           iv_load_policy: 3, fs: 0, playsinline: 1,
@@ -71,26 +54,40 @@
         },
         events: {
           onReady: (e) => {
-            log('onReady');
-
-            try { const ifr = e.target.getIframe(); if (ifr){ ifr.setAttribute('allow','autoplay; encrypted-media; clipboard-write; picture-in-picture; web-share'); ifr.setAttribute('referrerpolicy','strict-origin-when-cross-origin'); } } catch {}
+            try { 
+              const ifr = e.target.getIframe(); 
+              if (ifr){ 
+                ifr.setAttribute('allow','autoplay; encrypted-media; clipboard-write; picture-in-picture; web-share'); 
+                ifr.setAttribute('referrerpolicy','strict-origin-when-cross-origin'); 
+              } 
+            } catch {}
             try { e.target.mute(); } catch {}
-            try { e.target.playVideo(); log('playVideo() called'); } catch {}
+            try { e.target.playVideo(); } catch {}
           },
           onError: (e) => {
-            log('onError code ' + e.data, true);
-            // fallback to nocookie on error once
-            if (++tried < tryHosts.length) {
-              setTimeout(()=>{ stage.innerHTML = '<div id="ytplayer"></div>'; makePlayer(tryHosts[tried]); }, 100);
+            // Fallback to nocookie on error
+            if (e.data) {
+              setTimeout(()=>{ 
+                stage.innerHTML = '<div id="ytplayer"></div>';
+                player = new YT.Player('ytplayer', {
+                  host: 'https://www.youtube-nocookie.com',
+                  videoId,
+                  playerVars: {
+                    autoplay: 1, controls: 1, rel: 0, modestbranding: 1,
+                    iv_load_policy: 3, fs: 0, playsinline: 1,
+                    enablejsapi: 1, origin: location.origin, widget_referrer: location.origin,
+                    mute: 1
+                  }
+                });
+              }, 100);
             }
-          },
-          onStateChange: (e) => log('state=' + e.data)
+          }
         }
       });
     }
 
-    if (window.YT && YT.Player) makePlayer(tryHosts[0]);
-    else window.onYouTubeIframeAPIReady = ()=>{ log('YT API ready'); makePlayer(tryHosts[0]); };
+    if (window.YT && YT.Player) makePlayer();
+    else window.onYouTubeIframeAPIReady = makePlayer;
   }
 
   function ytPlay(){ if(player && player.playVideo) player.playVideo(); }
@@ -113,17 +110,16 @@
       titleEl.textContent = m.title || 'Untitled';
       channelEl.innerHTML = m.author_url ? `by <a href="${m.author_url}" target="_blank" rel="noreferrer noopener">${m.author||''}</a>` : (m.author ? `by ${m.author}` : '');
       credit.hidden = false;
-      log('meta ok');
-    } catch(e){ log('meta error: ' + e.message, true); }
+    } catch(e){}
   }
 
   async function tick(){
     try{
       const r = await fetch('/current?_=' + Date.now());
       const data = await r.json();
-      if (data.id && data.id !== lastVideoId){ log('new id=' + data.id); loadVideo(data.id); loadMetadata(); }
+      if (data.id && data.id !== lastVideoId){ loadVideo(data.id); loadMetadata(); }
       if (data.state && player) applyState(data.state);
-    }catch(e){ log('tick error: ' + e.message, true); }
+    }catch(e){}
     setTimeout(tick, 1000);
   }
   tick();

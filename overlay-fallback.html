@@ -1,0 +1,107 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CleanRouter Overlay (Fallback)</title>
+<style>
+  :root{ --pad:10px; --radius:12px; --margin:24px; --scale:1.25; --bg:rgba(0,0,0,.7); --fg:#fff; }
+  html,body{margin:0;height:100%;background:#000;overflow:hidden;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif}
+  #stage{position:fixed;inset:0}
+  iframe{position:absolute;inset:0;width:100%;height:100%;border:0;background:#000}
+  .credit{position:absolute;bottom:var(--margin);left:var(--margin);z-index:10;pointer-events:none;transform-origin:left bottom;transform:scale(var(--scale))}
+  .badge{background:var(--bg);color:var(--fg);padding:var(--pad) calc(var(--pad)+6px);border-radius:var(--radius);max-width:min(45vw,820px);text-align:left;line-height:1.25}
+  .title{font-weight:800;font-size:clamp(16px,2vw,26px);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .channel{margin-top:4px;font-weight:600;opacity:.95;font-size:clamp(13px,1.5vw,18px);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .channel a{color:inherit;text-decoration:none}
+  .debug{position:absolute;top:12px;right:12px;background:rgba(0,0,0,.7);color:#0f0;padding:4px 8px;border-radius:4px;font:12px monospace}
+</style>
+</head>
+<body>
+<div id="stage"></div>
+
+<div class="credit" id="credit" hidden>
+  <div class="badge">
+    <div class="title" id="title">Loading…</div>
+    <div class="channel" id="channel"></div>
+  </div>
+</div>
+
+<div class="debug" id="debug">Fallback Mode</div>
+
+<script>
+  const stage = document.getElementById('stage');
+  const titleEl = document.getElementById('title');
+  const channelEl = document.getElementById('channel');
+  const credit = document.getElementById('credit');
+  const debug = document.getElementById('debug');
+
+  let lastVideoId = null, lastState = null;
+
+  // Stateless control: rebuild iframe src for play/pause/seek
+  function loadVideo(videoId, state = { playing: true, time: 0 }) {
+    if (!videoId) return;
+    
+    const startTime = Math.floor(state.time);
+    const autoplay = state.playing ? 1 : 0;
+    
+    const src = `https://www.youtube.com/embed/${videoId}?` + new URLSearchParams({
+      autoplay,
+      start: startTime,
+      mute: 1,
+      controls: 1,
+      rel: 0,
+      modestbranding: 1,
+      iv_load_policy: 3,
+      fs: 0,
+      playsinline: 1
+    });
+
+    stage.innerHTML = `<iframe src="${src}" allow="autoplay; encrypted-media; clipboard-write; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin"></iframe>`;
+    
+    debug.textContent = `${state.playing ? 'PLAY' : 'PAUSE'} @ ${startTime}s`;
+    lastVideoId = videoId;
+    lastState = { ...state };
+  }
+
+  async function loadMetadata(){
+    try {
+      const r = await fetch('/meta');
+      const m = await r.json();
+      titleEl.textContent = m.title || 'Untitled';
+      channelEl.innerHTML = m.author_url ? `by <a href="${m.author_url}" target="_blank" rel="noreferrer noopener">${m.author||''}</a>` : (m.author ? `by ${m.author}` : '');
+      credit.hidden = false;
+    } catch(e){}
+  }
+
+  async function tick(){
+    try{
+      const r = await fetch('/current?_=' + Date.now());
+      const data = await r.json();
+      
+      // New video
+      if (data.id && data.id !== lastVideoId) {
+        loadVideo(data.id, data.state);
+        loadMetadata();
+        return;
+      }
+      
+      // State change (play/pause/seek)
+      if (data.state && lastState) {
+        const timeDiff = (Date.now() - data.state.lastUpdate) / 1000;
+        const expectedTime = data.state.time + (data.state.playing ? timeDiff : 0);
+        
+        const playingChanged = data.state.playing !== lastState.playing;
+        const timeJumped = Math.abs(expectedTime - lastState.time) > 3;
+        
+        if (playingChanged || timeJumped) {
+          loadVideo(data.id, { ...data.state, time: expectedTime });
+        }
+      }
+      
+    }catch(e){}
+    setTimeout(tick, 1000);
+  }
+  tick();
+</script>
+</body>
+</html>
