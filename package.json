@@ -1,0 +1,17 @@
+{
+  "name": "obs-cleanrouter",
+  "version": "1.0.0",
+  "description": "Clean router for OBS Browser Source - shows videos and web content without personal info",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "node-fetch": "^2.7.0"
+  },
+  "keywords": ["obs", "streaming", "overlay", "youtube"],
+  "author": "",
+  "license": "MIT"
+}

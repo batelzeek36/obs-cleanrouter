@@ -1,0 +1,101 @@
+<!doctype html><html><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CleanRouter Overlay</title>
+<style>
+  :root{ --pad:10px; --radius:12px; --margin:24px; --scale:1.25; --bg:rgba(0,0,0,.7); --fg:#fff; }
+  html,body{margin:0;height:100%;background:#000;overflow:hidden;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif}
+  .stage{position:fixed;inset:0}
+  iframe.player{position:absolute;inset:0;width:100%;height:100%;border:0;background:#000}
+  .credit{position:absolute;top:var(--margin);right:var(--margin);z-index:10;pointer-events:none;
+    transform-origin:right top; transform:scale(var(--scale));}
+  .badge{background:var(--bg);color:var(--fg);padding:var(--pad) calc(var(--pad)+6px);
+    border-radius:var(--radius);max-width:min(45vw,820px);text-align:right;line-height:1.25}
+  .title{font-weight:800;font-size:clamp(16px,2vw,26px);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .channel{margin-top:4px;font-weight:600;opacity:.95;font-size:clamp(13px,1.5vw,18px);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .channel a{color:inherit;text-decoration:none}
+  /* tiny on-screen hint (toggle panel) */
+  .hint{position:absolute;left:12px;top:12px;background:rgba(0,0,0,.5);color:#fff;border-radius:8px;padding:4px 8px;font-size:12px}
+</style>
+</head><body>
+<div class="stage" id="stage"></div>
+<div class="credit" id="credit" hidden><div class="badge">
+  <div class="title" id="title">Loading…</div>
+  <div class="channel" id="channel"></div>
+</div></div>
+<div class="hint">CleanRouter • top-right • scale 1.25</div>
+<script>
+  const stage = document.getElementById('stage');
+  const titleEl = document.getElementById('title');
+  const channelEl = document.getElementById('channel');
+  const credit = document.getElementById('credit');
+  let lastURL = '', lastVid = '';
+
+  // Determine if URL is a known video and get an embed URL
+  function toEmbed(u){
+    try{
+      const url = new URL(u);
+      if (/youtube\.com|youtu\.be/.test(url.hostname)) {
+        const parts = url.pathname.split('/').filter(Boolean);
+        let id = url.searchParams.get('v')
+                 || (url.hostname.includes('youtu.be') ? parts[0] : null)
+                 || (parts.includes('live') ? parts[parts.indexOf('live')+1] : null)
+                 || (parts.includes('shorts') ? parts[parts.indexOf('shorts')+1] : null);
+        if (id) return { type:'youtube', id, src:`https://www.youtube-nocookie.com/embed/${id}?autoplay=1&controls=1&modestbranding=1&rel=0&iv_load_policy=3&fs=0&enablejsapi=1&origin=${encodeURIComponent(location.origin)}` };
+      }
+    }catch(e){}
+    return { type:'generic', id:null, src:null }; // generic page
+  }
+
+  let player; // keep reference to iframe
+  async function loadURL(u){
+    const { type, id, src } = toEmbed(u);
+    stage.innerHTML = ''; // clear
+
+    if (type === 'youtube' && src){
+      const ifr = document.createElement('iframe');
+      ifr.className='player'; ifr.id='ytplayer'; ifr.src=src;
+      ifr.allow='accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share';
+      ifr.referrerPolicy='strict-origin-when-cross-origin';
+      stage.appendChild(ifr);
+      player = ifr;
+    } else {
+      // Generic page: show nothing (black) but still display title/author
+      player = null;
+    }
+
+    // Get metadata server-side to avoid CORS and login leaks
+    const r = await fetch('/meta?u=' + encodeURIComponent(u));
+    const m = await r.json();
+    titleEl.textContent = m.title || 'Untitled';
+    channelEl.innerHTML = (m.author_url)
+      ? `by <a href="${m.author_url}" target="_blank" rel="noreferrer noopener">${m.author||''}</a>`
+      : (m.author ? `by ${m.author}` : '');
+    credit.hidden = false;
+    lastVid = id || '';
+  }
+
+  // Poll the local server for the "current" URL and swap if changed
+  async function tick(){
+    try{
+      const r = await fetch('/current?_=' + Date.now());
+      const j = await r.json();
+      const u = j.url || '';
+      if (u && u !== lastURL){
+        lastURL = u;
+        loadURL(u);
+      }
+    }catch(e){}
+    setTimeout(tick, 1000);
+  }
+  tick();
+
+  // Also detect auto-next inside YT (lightweight heuristic)
+  window.addEventListener('message', (ev) => {
+    // If YouTube posts its state, force a metadata refresh occasionally
+    if (String(ev.origin).includes('youtube')) {
+      // Force /meta refresh every time we get messages from YT
+      if (lastURL) loadURL(lastURL);
+    }
+  });
+</script>
+</body></html>
